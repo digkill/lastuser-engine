@@ -1,0 +1,3 @@
+[alembic]
+script_location = alembic
+sqlalchemy.url = postgresql+asyncpg://lastuser:secret@localhost/lastuser

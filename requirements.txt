@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+asyncpg
+kafka-python
+playwright
+python-dotenv
+pydantic
+aiogram
