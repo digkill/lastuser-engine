@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Any
 
 class CampaignCreate(BaseModel):
@@ -15,7 +15,9 @@ class CampaignInfo(BaseModel):
     url: str
     sessions: int
     config: dict
-    created_at: str
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class JobInfo(BaseModel):
     id: int
@@ -26,12 +28,16 @@ class JobInfo(BaseModel):
     log: Optional[Any]
     updated_at: Optional[str]
 
+    model_config = ConfigDict(from_attributes=True)
+
 class JobLogInfo(BaseModel):
     id: int
     job_id: int
     event: str
     message: str
     created_at: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ProxyInfo(BaseModel):
     id: int
@@ -44,9 +50,13 @@ class ProxyInfo(BaseModel):
     status: str
     updated_at: str
 
+    model_config = ConfigDict(from_attributes=True)
+
 class AntidetectProfileInfo(BaseModel):
     id: int
     external_id: str
     provider: str
     status: str
     last_used_at: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)

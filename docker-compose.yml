@@ -1,56 +1,114 @@
-version: '3.8'
 services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: lastuser
-      POSTGRES_USER: lastuser
-      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   kafka:
     image: bitnami/kafka:latest
     ports:
       - "9092:9092"
+      - "9093:9093"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      ALLOW_PLAINTEXT_LISTENER: "yes"
-    depends_on:
-      - zookeeper
-
-  zookeeper:
-    image: bitnami/zookeeper:latest
-    ports:
-      - "2181:2181"
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_KRAFT_MODE_ENABLED=yes
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=1
+      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=1
+      - KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS=3000  # Задержка для ребалансировки группы
+      - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1  # Репликация для топика offsets
+    volumes:
+      - ./docker/data/kafka:/bitnami/kafka
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 180s  # Увеличено до 180 секунд
 
   backend:
-    build: ./app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
     volumes:
       - ./app:/app
+      - ./shared:/app/shared
     environment:
-      DATABASE_URL: postgresql+asyncpg://lastuser:secret@postgres/lastuser
-      KAFKA_BROKER: kafka:9092
+      DATABASE_URL: ${DATABASE_URL}
+      KAFKA_BROKER: ${KAFKA_BROKER}
+      GOLOGIN_TOKEN: ${GOLOGIN_TOKEN}
     depends_on:
-      - postgres
-      - kafka
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8001:8001"
+    networks:
+      - appnet
 
   worker:
-    build: ./worker
+    build:
+      context: .
+      dockerfile: ./docker/worker/Dockerfile
     command: python main.py
     volumes:
       - ./worker:/worker
+      - ./shared:/worker/shared
     environment:
-      DATABASE_URL: postgresql+asyncpg://lastuser:secret@postgres/lastuser
-      KAFKA_BROKER: kafka:9092
+      DATABASE_URL: ${DATABASE_URL}
+      KAFKA_BROKER: ${KAFKA_BROKER}
+      GOLOGIN_TOKEN: ${GOLOGIN_TOKEN}
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - appnet
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8081:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=dev
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=${KAFKA_BROKER}
+    networks:
+      - appnet
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_BROKERS=${KAFKA_BROKER}
+    networks:
+      - appnet
+
+networks:
+  appnet:
+    driver: bridge

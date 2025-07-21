@@ -6,7 +6,7 @@ type Job = {
   status: string;
   started_at: string | null;
   finished_at: string | null;
-  log: any;
+  log: never;
 };
 
 export const JobTable: React.FC<{ campaignId: number }> = ({ campaignId }) => {

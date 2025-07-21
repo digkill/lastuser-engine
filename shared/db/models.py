@@ -27,7 +27,9 @@ class Job(Base):
     profile_id = Column(Integer)
     log = Column(JSON)
     updated_at = Column(TIMESTAMP)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # добавь эту строку
 
+    user = relationship("User", back_populates="jobs")
     campaign = relationship("Campaign", back_populates="jobs")
     logs = relationship("JobLog", back_populates="job")
 
@@ -68,3 +70,11 @@ class User(Base):
     username = Column(String(64))
     role = Column(String(32))
     created_at = Column(TIMESTAMP)
+
+    jobs = relationship("Job", back_populates="user")
+
+class Fingerprint(Base):
+    __tablename__ = "fingerprints"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    data = Column(JSON, nullable=False)  # fingerprint хранится как JSON
