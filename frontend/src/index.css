@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 :root {
+  min-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -26,9 +31,8 @@ a:hover {
 
 body {
   margin: 0;
-  display: flex;
+  display: block;
   place-items: center;
-  min-width: 320px;
   min-height: 100vh;
 }
 

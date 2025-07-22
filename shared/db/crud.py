@@ -1,6 +1,8 @@
+from asyncio.log import logger
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from .models import Campaign, Job, Proxy, AntidetectProfile
+from .models import Campaign, Job, Proxy, AntidetectProfile, Fingerprint
 
 async def create_campaign(db: AsyncSession, data):
     campaign = Campaign(**data)
@@ -39,6 +41,13 @@ async def get_all_jobs(db: AsyncSession):
     return result.scalars().all()
 
 async def get_fingerprint(db, user_id):
-    res = await db.execute(select(Fingerprint).where(Fingerprint.user_id == user_id))
-    fp = res.scalar_one_or_none()
-    return fp.data if fp else None
+    try:
+        logger.info(f"Fetching fingerprint for user_id: {user_id}")
+        res = await db.execute(select(Fingerprint).where(Fingerprint.user_id == user_id))
+        result = res.scalars().first()
+        if result is None:
+            logger.warning(f"No fingerprint found for user_id: {user_id}")
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching fingerprint for user_id {user_id}: {e}")
+        raise

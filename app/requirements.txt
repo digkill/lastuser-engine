@@ -1,7 +1,8 @@
-fastapi
-uvicorn
-sqlalchemy
-asyncpg
-python-dotenv
+fastapi==0.115.4
+uvicorn==0.32.0
+SQLAlchemy==2.0.41
+asyncpg==0.30.0
+python-dotenv==1.1.1
+aiokafka==0.12.0
+requests==2.32.4
 kafka-python
-requests

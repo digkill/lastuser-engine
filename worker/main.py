@@ -1,71 +1,42 @@
 import asyncio
-import os
-from aiokafka import AIOKafkaConsumer
-import json
-from aiokafka.errors import GroupCoordinatorNotAvailableError, TopicAuthorizationFailedError, KafkaConnectionError, KafkaError
-
-from shared.db.session import AsyncSessionLocal
-from shared.db.crud import get_job, get_fingerprint  # <- добавили get_fingerprint
+import logging
+from sqlalchemy import select
+from shared.db.crud import get_job, get_fingerprint
 from browser_engine import run_scenario
+from shared.db.session import get_db
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def process_job(job_data):
-    async with AsyncSessionLocal() as db:
-        job = await get_job(db, job_data["job_id"])
-        if not job:
-            print(f"Job not found: {job_data['job_id']}")
-            return
-        fingerprint = await get_fingerprint(db, job.user_id)  # <-- получаем fingerprint
-        await run_scenario(job, fingerprint)
-
-async def connect_with_retries(consumer, max_retries=30, delay=10):
-    for attempt in range(max_retries):
-        try:
-            print(f"Attempt {attempt + 1}/{max_retries} to connect to Kafka at {KAFKA_BROKER}...")
-            await consumer.start()
-            print("Connected to Kafka and started consuming messages...")
-            return True
-        except (GroupCoordinatorNotAvailableError, TopicAuthorizationFailedError, KafkaConnectionError) as e:
-            print(f"Kafka error (retrying): {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(delay)
-            continue
-        except KafkaError as e:
-            print(f"General Kafka error: {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(delay)
-            continue
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            return False
-    return False
-
-async def main():
-    print("Starting Last User Engine worker...")
-    consumer = AIOKafkaConsumer(
-        'lastuser-tasks',
-        bootstrap_servers=KAFKA_BROKER,
-        group_id="lastuser-worker",
-        value_deserializer=lambda x: json.loads(x.decode("utf-8")),
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        max_poll_interval_ms=600000,
-        session_timeout_ms=30000,
-        heartbeat_interval_ms=10000
-    )
+async def get_fingerprint(db, user_id):
     try:
-        if not await connect_with_retries(consumer):
-            raise Exception("Failed to connect to Kafka after retries")
-        async for msg in consumer:
-            print(f"Received message: {msg.value}")
-            await process_job(msg.value)
+        logger.info(f"Fetching fingerprint for user_id: {user_id}")
+        if user_id is None:
+            logger.warning("user_id is None, returning None")
+            return None
+        res = await db.execute(select(Fingerprint).where(Fingerprint.user_id == user_id))
+        result = res.scalars().first()
+        if result is None:
+            logger.warning(f"No fingerprint found for user_id: {user_id}")
+        return result
     except Exception as e:
-        print(f"Kafka connection error: {e}")
+        logger.error(f"Error fetching fingerprint for user_id {user_id}: {e}")
         raise
-    finally:
-        print("Stopping Kafka consumer...")
-        await consumer.stop()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def process_job(message):
+    job_id = message.get('job_id')
+    async with get_db() as db:
+        job = await get_job(db, job_id)
+        if job is None:
+            logger.error(f"Job with id {job_id} not found")
+            return
+        if not hasattr(job, 'user_id') or job.user_id is None:
+            logger.warning(f"Job with id {job_id} has no user_id, proceeding without fingerprint")
+            fingerprint = None
+        else:
+            fingerprint = await get_fingerprint(db, job.user_id)
+        try:
+            await run_scenario(job, fingerprint)
+        except Exception as e:
+            logger.error(f"Error running scenario for job {job_id}: {e}")
+            return

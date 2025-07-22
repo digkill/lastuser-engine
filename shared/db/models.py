@@ -1,5 +1,8 @@
 from sqlalchemy import Column, Integer, String, TIMESTAMP, ForeignKey, JSON, Text, BigInteger
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.sql.sqltypes import DateTime  # Правильный импорт DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -74,7 +77,9 @@ class User(Base):
     jobs = relationship("Job", back_populates="user")
 
 class Fingerprint(Base):
-    __tablename__ = "fingerprints"
+    __tablename__ = 'fingerprints'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False, index=True)
-    data = Column(JSON, nullable=False)  # fingerprint хранится как JSON
+    label = Column(String(128), nullable=True)
+    data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    user_id = Column(Integer, nullable=True)  # Если добавили user_id
