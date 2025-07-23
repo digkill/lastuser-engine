@@ -193,22 +193,27 @@ async def list_jobs_route(
         db: AsyncSession = Depends(get_db),
         campaign_id: Optional[int] = Query(None, description="Filter jobs by campaign ID")
 ):
-    """
-    Retrieve a list of jobs, optionally filtered by campaign ID.
-
-    Args:
-        db: Async database session.
-        campaign_id: Optional campaign ID to filter jobs.
-
-    Returns:
-        List[JobInfo]: List of jobs.
-    """
     try:
         if campaign_id:
             jobs = await get_jobs_by_campaign(db, campaign_id)
         else:
             jobs = await get_all_jobs(db)
-        return [JobInfo.model_validate(j) for j in jobs]
+        return [
+            JobInfo(
+                id=j.id,
+                campaign_id=j.campaign_id,
+                status=j.status,
+                started_at=j.started_at.isoformat() if j.started_at else None,
+                finished_at=j.finished_at.isoformat() if j.finished_at else None,
+                worker_id=j.worker_id,
+                proxy_id=j.proxy_id,
+                profile_id=j.profile_id,
+                log=j.log,
+                updated_at=j.updated_at.isoformat() if j.updated_at else None,
+                user_id=j.user_id
+            )
+            for j in jobs
+        ]
     except Exception as e:
         logger.error(f"Error fetching jobs: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch jobs")

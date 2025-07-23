@@ -5,39 +5,54 @@ import random
 import time
 import json
 import logging
-import asyncpg
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import text
 from playwright.async_api import async_playwright
+from shared.db.session import get_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 async def save_worker_log(
+        db: AsyncSession,
         worker_id, url, action_type, action_data,
         status, screenshot_bytes=None, error_msg=None,
         started_at=None, finished_at=None
 ):
+    logger.info(f"Saving worker log for worker_id: {worker_id}")
     duration = int((finished_at - started_at).total_seconds() * 1000) if started_at and finished_at else 0
     screenshot_b64 = None
     if screenshot_bytes:
         screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
     try:
-        dsn = os.getenv("DATABASE_URL").replace("postgresql+asyncpg://", "postgresql://")
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(
-            """
-            INSERT INTO worker_logs
-            (worker_id, url, action_type, action_data, status, screenshot, error_msg, started_at, finished_at, duration_ms)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-            worker_id, url, action_type, json.dumps(action_data, ensure_ascii=False), status,
-            screenshot_b64, error_msg, started_at, finished_at, duration
+        await db.execute(
+            text(
+                """
+                INSERT INTO worker_logs
+                (worker_id, url, action_type, action_data, status, screenshot, error_msg, started_at, finished_at, duration_ms)
+                VALUES (:worker_id, :url, :action_type, :action_data, :status, :screenshot, :error_msg, :started_at, :finished_at, :duration)
+                """
+            ),
+            {
+                "worker_id": worker_id,
+                "url": url,
+                "action_type": action_type,
+                "action_data": json.dumps(action_data, ensure_ascii=False),
+                "status": status,
+                "screenshot": screenshot_b64,
+                "error_msg": error_msg,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration": duration
+            }
         )
-        await conn.close()
+        await db.commit()
+        logger.info(f"Successfully saved worker log for worker_id: {worker_id}")
     except Exception as e:
-        logger.error(f"Error saving worker log: {e}")
-        return  # Avoid raising to prevent worker crash
+        logger.error(f"Error saving worker log for worker_id {worker_id}: {e}")
+        await db.rollback()
 
 
 def rand_t(min_, max_):
@@ -80,7 +95,7 @@ async def do_action(page, action):
         return "continue"
     except Exception as e:
         logger.error(f"Error performing action {action}: {e}")
-        return "continue"  # Continue to avoid crashing
+        return "continue"
 
 
 def prepare_navigator_from_fingerprint(fingerprint):
@@ -124,7 +139,11 @@ def prepare_navigator_from_fingerprint(fingerprint):
         return None
 
 
-async def run_scenario(job, fingerprint=None):
+async def run_scenario(job, fingerprint=None, db: AsyncSession = None):
+    if db is None:
+        logger.error("Database session not provided to run_scenario")
+        return
+    logger.info(f"Starting run_scenario for job {job.id}")
     navigator = prepare_navigator_from_fingerprint(fingerprint) if fingerprint else None
     worker_id = f"job_{job.id}_{int(time.time())}"
     started = datetime.datetime.utcnow()
@@ -134,19 +153,26 @@ async def run_scenario(job, fingerprint=None):
     action_log = []
 
     try:
+        logger.info(f"Starting Playwright for job {job.id}")
         async with async_playwright() as p:
             browser_args = {
                 "headless": True,
                 "args": ["--disable-blink-features=AutomationControlled"],
             }
-            if navigator:
-                browser_args.update({
-                    "user_agent": navigator["user_agent"],
-                    "viewport": navigator["viewport"],
-                    "locale": navigator["accept_language"],
-                })
+            logger.info(f"Launching browser with args: {browser_args}")
             browser = await p.chromium.launch(**browser_args)
-            context = await browser.new_context(**browser_args)
+
+            context_args = {
+                "no_viewport": False,
+            }
+            if navigator:
+                context_args.update({
+                    "user_agent": navigator["user_agent"],
+                    "locale": navigator["accept_language"],
+                    "viewport": navigator["viewport"],
+                })
+            logger.info(f"Creating new context with args: {context_args}")
+            context = await browser.new_context(**context_args)
 
             if navigator:
                 js_patch = f"""
@@ -163,7 +189,7 @@ async def run_scenario(job, fingerprint=None):
                 action_log.append({"step": "goto", "url": "https://yandex.ru/", "ts": str(datetime.datetime.utcnow())})
 
                 for char in job.campaign.query:
-                    await page.locator('input[name="text"]').type(char, delay=rand_t(70, 210))
+                    await page.locator('input[id="text"]').type(char, delay=rand_t(70, 210))
                 await page.keyboard.press("Enter")
                 await page.wait_for_timeout(int(rand_t(2, 3.5) * 1000))
                 action_log.append(
@@ -203,16 +229,20 @@ async def run_scenario(job, fingerprint=None):
                 action_log.append({"step": "exception", "error": error_msg, "ts": str(datetime.datetime.utcnow())})
             finally:
                 await browser.close()
+                logger.info(f"Browser closed for job {job.id}")
 
     except Exception as ex:
         status = "fail"
         error_msg = str(ex)
+        logger.error(f"Error running Playwright for job {job.id}: {ex}")
         if not screenshot_bytes:
             screenshot_bytes = None
 
     finally:
         finished = datetime.datetime.utcnow()
+        logger.info(f"Saving worker log and updating job status for job {job.id}")
         await save_worker_log(
+            db=db,
             worker_id=worker_id,
             url="https://yandex.ru/",
             action_type="site-crawl",
@@ -223,3 +253,31 @@ async def run_scenario(job, fingerprint=None):
             started_at=started,
             finished_at=finished
         )
+        # Обновляем статус задания в таблице jobs
+        try:
+            logger.info(f"Updating job {job.id} status to {status}")
+            await db.execute(
+                text(
+                    """
+                    UPDATE jobs
+                    SET status = :status,
+                        worker_id = :worker_id,
+                        started_at = :started_at,
+                        finished_at = :finished_at,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :job_id
+                    """
+                ),
+                {
+                    "status": status,
+                    "worker_id": worker_id,
+                    "started_at": started,
+                    "finished_at": finished,
+                    "job_id": job.id
+                }
+            )
+            await db.commit()
+            logger.info(f"Successfully updated job {job.id} status to {status}")
+        except Exception as e:
+            logger.error(f"Error updating job {job.id} status: {e}")
+            await db.rollback()

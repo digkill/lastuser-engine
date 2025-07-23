@@ -5,22 +5,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
+DATABASE_DB_URL = os.getenv("DATABASE_URL")
+if not DATABASE_DB_URL:
     raise RuntimeError("DATABASE_URL is not set in environment (.env)")
-if not DATABASE_URL.startswith("postgresql+asyncpg://"):
+if not DATABASE_DB_URL.startswith("postgresql+asyncpg://"):
     raise ValueError("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://...)")
 
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+engine = create_async_engine(DATABASE_DB_URL, echo=True, future=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-
 async def get_db():
-    """
-    Provide an async database session for FastAPI dependency injection.
-
-    Yields:
-        AsyncSession: An async SQLAlchemy session.
-    """
     async with AsyncSessionLocal() as session:
         yield session

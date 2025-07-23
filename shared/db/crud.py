@@ -3,6 +3,7 @@ from asyncio.log import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from .models import Campaign, Job, Proxy, AntidetectProfile, Fingerprint
+from sqlalchemy.orm import selectinload
 
 async def create_campaign(db: AsyncSession, data):
     campaign = Campaign(**data)
@@ -20,10 +21,19 @@ async def create_job(db: AsyncSession, campaign_id, status="new"):
     db.add(job)
     await db.commit()
     await db.refresh(job)
+    # Если нужно сразу campaign — делай дополнительный запрос:
+    result = await db.execute(
+        select(Job).options(selectinload(Job.campaign)).where(Job.id == job.id)
+    )
+    job = result.scalars().first()
     return job
 
 async def get_job(db: AsyncSession, job_id):
-    result = await db.execute(select(Job).where(Job.id == job_id))
+    result = await db.execute(
+        select(Job)
+        .options(selectinload(Job.campaign))
+        .where(Job.id == job_id)
+    )
     return result.scalars().first()
 
 async def get_all_campaigns(db: AsyncSession):
@@ -32,12 +42,16 @@ async def get_all_campaigns(db: AsyncSession):
 
 async def get_jobs_by_campaign(db: AsyncSession, campaign_id: int):
     result = await db.execute(
-        select(Job).where(Job.campaign_id == campaign_id)
+        select(Job)
+        .options(selectinload(Job.campaign))  # ← Добавь это!
+        .where(Job.campaign_id == campaign_id)
     )
     return result.scalars().all()
 
 async def get_all_jobs(db: AsyncSession):
-    result = await db.execute(select(Job))
+    result = await db.execute(
+        select(Job).options(selectinload(Job.campaign))
+    )
     return result.scalars().all()
 
 async def get_fingerprint(db, user_id):

@@ -78,6 +78,7 @@ services:
     volumes:
       - ./worker:/worker
       - ./shared:/worker/shared
+      - playwright_cache:/root/.cache/ms-playwright
     environment:
       DATABASE_URL: ${DATABASE_URL}
       KAFKA_BROKER: ${KAFKA_BROKER}
@@ -108,6 +109,9 @@ services:
       - KAFKA_BROKERS=${KAFKA_BROKER}
     networks:
       - appnet
+
+volumes:
+  playwright_cache:
 
 networks:
   appnet:

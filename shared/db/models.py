@@ -3,6 +3,7 @@ from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql.sqltypes import DateTime  # Правильный импорт DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
+from sqlalchemy.sql import func
 
 Base = declarative_base()
 
@@ -30,7 +31,7 @@ class Job(Base):
     profile_id = Column(Integer)
     log = Column(JSON)
     updated_at = Column(TIMESTAMP)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # добавь эту строку
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     user = relationship("User", back_populates="jobs")
     campaign = relationship("Campaign", back_populates="jobs")
@@ -83,3 +84,4 @@ class Fingerprint(Base):
     data = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     user_id = Column(Integer, nullable=True)  # Если добавили user_id
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Any
+from datetime import datetime
 
 class CampaignCreate(BaseModel):
     name: str
@@ -22,13 +23,21 @@ class CampaignInfo(BaseModel):
 class JobInfo(BaseModel):
     id: int
     campaign_id: int
-    status: str
-    started_at: Optional[str]
-    finished_at: Optional[str]
-    log: Optional[Any]
-    updated_at: Optional[str]
+    status: Optional[str] = None
+    started_at: Optional[datetime] = None  # Изменено на datetime
+    finished_at: Optional[datetime] = None  # Изменено на datetime
+    worker_id: Optional[str] = None
+    proxy_id: Optional[int] = None
+    profile_id: Optional[int] = None
+    log: Optional[dict] = None
+    updated_at: Optional[datetime] = None  # Изменено на datetime
+    user_id: Optional[int] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True  # Для совместимости с SQLAlchemy
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None  # Сериализация datetime в ISO-строку
+        }
 
 class JobLogInfo(BaseModel):
     id: int
