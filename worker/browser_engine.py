@@ -17,13 +17,12 @@ async def save_worker_log(
         status, screenshot_bytes=None, error_msg=None,
         started_at=None, finished_at=None
 ):
-    duration = int((finished_at - started_at).total_seconds() * 1000)
+    duration = int((finished_at - started_at).total_seconds() * 1000) if started_at and finished_at else 0
     screenshot_b64 = None
     if screenshot_bytes:
         screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
     try:
-        # Strip +asyncpg from DATABASE_URL for asyncpg.connect
         dsn = os.getenv("DATABASE_URL").replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(dsn)
         await conn.execute(
@@ -38,7 +37,7 @@ async def save_worker_log(
         await conn.close()
     except Exception as e:
         logger.error(f"Error saving worker log: {e}")
-        raise
+        return  # Avoid raising to prevent worker crash
 
 
 def rand_t(min_, max_):
@@ -46,70 +45,45 @@ def rand_t(min_, max_):
 
 
 async def do_action(page, action):
-    if action["action"] == "wait":
-        await page.wait_for_timeout(int(rand_t(action.get("min", 1), action.get("max", 2)) * 1000))
-    elif action["action"] == "scroll":
-        for _ in range(action.get("times", 1)):
-            await page.mouse.wheel(0, random.randint(200, 800))
-            await page.wait_for_timeout(int(rand_t(action.get("pause_min", 0.3), action.get("pause_max", 1.0)) * 1000))
-    elif action["action"] == "random_click" and random.random() < action.get("prob", 0.2):
-        links = await page.query_selector_all("a")
-        if links:
-            await random.choice(links).click()
-            await page.wait_for_timeout(int(rand_t(0.5, 2) * 1000))
-    elif action["action"] == "ad_click" and random.random() < action.get("prob", 0.08):
-        ads = await page.query_selector_all('.serp-item--ad')
-        if ads:
-            await random.choice(ads).click()
-            await page.wait_for_timeout(int(rand_t(3, 9) * 1000))
-    elif action["action"] == "fill_form" and random.random() < action.get("prob", 0.1):
-        for field, value in action.get("fields", {}).items():
-            if await page.query_selector(f"input[name={field}]"):
-                await page.fill(f"input[name={field}]", value)
-        submit = await page.query_selector("form button[type=submit]")
-        if submit:
-            await submit.click()
-            await page.wait_for_timeout(int(rand_t(2, 4) * 1000))
-    elif action["action"] == "read":
-        await page.wait_for_timeout(int(rand_t(action.get("min", 5), action.get("max", 20)) * 1000))
-    elif action["action"] == "bounce" and random.random() < action.get("prob", 0.05):
-        await page.go_back()
-        await page.wait_for_timeout(int(rand_t(0.5, 1.7) * 1000))
-        return "exit"
-    return "continue"
-
-async def save_worker_log(
-    worker_id, url, action_type, action_data,
-    status, screenshot_bytes=None, error_msg=None,
-    started_at=None, finished_at=None
-):
-    duration = int((finished_at - started_at).total_seconds() * 1000)
-    screenshot_b64 = None
-    if screenshot_bytes:
-        screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-
     try:
-        dsn = os.getenv("DATABASE_URL").replace("postgresql+asyncpg://", "postgresql://")
-        conn = await asyncpg.connect(dsn)
-        await conn.execute(
-            """
-            INSERT INTO worker_logs
-            (worker_id, url, action_type, action_data, status, screenshot, error_msg, started_at, finished_at, duration_ms)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-            worker_id, url, action_type, json.dumps(action_data, ensure_ascii=False), status,
-            screenshot_b64, error_msg, started_at, finished_at, duration
-        )
-        await conn.close()
+        if action["action"] == "wait":
+            await page.wait_for_timeout(int(rand_t(action.get("min", 1), action.get("max", 2)) * 1000))
+        elif action["action"] == "scroll":
+            for _ in range(action.get("times", 1)):
+                await page.mouse.wheel(0, random.randint(200, 800))
+                await page.wait_for_timeout(
+                    int(rand_t(action.get("pause_min", 0.3), action.get("pause_max", 1.0)) * 1000))
+        elif action["action"] == "random_click" and random.random() < action.get("prob", 0.2):
+            links = await page.query_selector_all("a")
+            if links:
+                await random.choice(links).click()
+                await page.wait_for_timeout(int(rand_t(0.5, 2) * 1000))
+        elif action["action"] == "ad_click" and random.random() < action.get("prob", 0.08):
+            ads = await page.query_selector_all('.serp-item--ad')
+            if ads:
+                await random.choice(ads).click()
+                await page.wait_for_timeout(int(rand_t(3, 9) * 1000))
+        elif action["action"] == "fill_form" and random.random() < action.get("prob", 0.1):
+            for field, value in action.get("fields", {}).items():
+                if await page.query_selector(f"input[name={field}]"):
+                    await page.fill(f"input[name={field}]", value)
+            submit = await page.query_selector("form button[type=submit]")
+            if submit:
+                await submit.click()
+                await page.wait_for_timeout(int(rand_t(2, 4) * 1000))
+        elif action["action"] == "read":
+            await page.wait_for_timeout(int(rand_t(action.get("min", 5), action.get("max", 20)) * 1000))
+        elif action["action"] == "bounce" and random.random() < action.get("prob", 0.05):
+            await page.go_back()
+            await page.wait_for_timeout(int(rand_t(0.5, 1.7) * 1000))
+            return "exit"
+        return "continue"
     except Exception as e:
-        logger.error(f"Error saving worker log: {e}")
-        raise
+        logger.error(f"Error performing action {action}: {e}")
+        return "continue"  # Continue to avoid crashing
 
 
 def prepare_navigator_from_fingerprint(fingerprint):
-    """
-    Преобразует fingerprint.data (JSONB из БД) в формат navigator для Playwright
-    """
     if not fingerprint or not fingerprint.data:
         logger.warning("No fingerprint or fingerprint.data provided")
         return None
@@ -122,7 +96,6 @@ def prepare_navigator_from_fingerprint(fingerprint):
                 language = langs[0][0]
             elif isinstance(langs[0], str):
                 language = langs[0]
-        # Обработка screenResolution
         screen_resolution = fingerprint_data.get("screenResolution", [1920, 1080])
         if isinstance(screen_resolution, dict) and "value" in screen_resolution:
             screen_resolution = screen_resolution.get("value", [1920, 1080])
@@ -147,7 +120,7 @@ def prepare_navigator_from_fingerprint(fingerprint):
         }
         return navigator
     except Exception as ex:
-        logger.error(f"Ошибка парсинга fingerprint.data: {ex}")
+        logger.error(f"Error parsing fingerprint.data: {ex}")
         return None
 
 
@@ -228,14 +201,12 @@ async def run_scenario(job, fingerprint=None):
                 except Exception:
                     screenshot_bytes = None
                 action_log.append({"step": "exception", "error": error_msg, "ts": str(datetime.datetime.utcnow())})
-                raise
             finally:
                 await browser.close()
 
     except Exception as ex:
-        if not error_msg:
-            status = "fail"
-            error_msg = str(ex)
+        status = "fail"
+        error_msg = str(ex)
         if not screenshot_bytes:
             screenshot_bytes = None
 
